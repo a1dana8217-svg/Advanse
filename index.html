@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>দ্রুত ছবি ব্যাকগ্রাউন্ড এডিটর</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;padding:16px;
+  font-family:Arial,sans-serif;
+  background:#edf2f7;color:#172033;
+}
+.app{
+  max-width:480px;margin:auto;padding:20px;
+  background:white;border-radius:16px;
+  box-shadow:0 4px 18px #0001;
+}
+h2{text-align:center;font-size:23px}
+p{font-size:14px;line-height:1.6}
+input,select,button{
+  width:100%;padding:12px;margin:7px 0;
+  font-size:15px;border-radius:8px;
+}
+input,select{border:1px solid #ccd3df;background:white}
+button{
+  border:0;background:#0757b7;color:white;
+  font-weight:bold;cursor:pointer;
+}
+button:disabled{opacity:.55}
+.preview{
+  text-align:center;margin:15px auto;
+  background:#e2e8f0;padding:12px;border-radius:10px;
+}
+canvas{
+  width:192px;max-width:100%;height:auto;
+  border:1px solid #bbb;
+}
+#status{color:#0757b7;overflow-wrap:anywhere}
+.small{font-size:12px;color:#5b6575}
+</style>
+</head>
+
+<body>
+<div class="app">
+<h2>ছবি ব্যাকগ্রাউন্ড এডিটর</h2>
+<p>ছবি নির্বাচন করুন। প্রথমবার মডেল ডাউনলোড হতে সময় লাগতে পারে।</p>
+
+<input type="file" id="photo" accept="image/*">
+
+<label for="bg">ব্যাকগ্রাউন্ডের রং</label>
+<select id="bg">
+  <option value="#ffffff">সাদা</option>
+  <option value="#000080">নেভি ব্লু</option>
+  <option value="#87ceeb">আকাশি নীল</option>
+  <option value="#dbeafe">হালকা নীল</option>
+  <option value="#008000">সবুজ</option>
+  <option value="#ff0000">লাল</option>
+  <option value="#000000">কালো</option>
+</select>
+
+<label for="zoom">ছবির আকার ঠিক করুন</label>
+<input id="zoom" type="range" min="80" max="120"
+       value="100" step="1">
+<p class="small">স্লাইডার দিয়ে ছবির আকার পরিবর্তন করুন।</p>
+
+<button id="process">ব্যাকগ্রাউন্ড সরান</button>
+
+<div class="preview">
+<canvas id="canvas" width="480" height="570"></canvas>
+</div>
+
+<p id="status">ছবি নির্বাচন করে শুরু করুন।</p>
+
+<button id="download" disabled>ছবি ডাউনলোড করুন</button>
+
+<p class="small">
+মাপ: ১.৬ × ১.৯ ইঞ্চি<br>
+পিক্সেল: ৪৮০ × ৫৭০<br>
+লক্ষ্য: ৩০০ DPI
+</p>
+</div>
+
+<script type="module">
+import { removeBackground } from
+"https://esm.sh/@imgly/background-removal@1.5.5";
+
+const $ = id => document.getElementById(id);
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+
+let cutout = null;
+let busy = false;
+
+function drawPreview() {
+  if (!cutout) return;
+
+  ctx.fillStyle = $("bg").value;
+  ctx.fillRect(0, 0, 480, 570);
+
+  const zoom = Number($("zoom").value) / 100;
+
+  // পুরো ছবির অনুপাত ঠিক রেখে ফ্রেমে বসানো
+  const scale = Math.min(
+    480 / cutout.width,
+    570 / cutout.height
+  ) * zoom;
+
+  const w = cutout.width * scale;
+  const h = cutout.height * scale;
+
+  ctx.drawImage(
+    cutout,
+    (480 - w) / 2,
+    (570 - h) / 2,
+    w, h
+  );
+}
+
+$("bg").addEventListener("change", drawPreview);
+$("zoom").addEventListener("input", drawPreview);
+
+$("process").addEventListener("click", async () => {
+  if (busy) return;
+
+  const file = $("photo").files[0];
+
+  if (!file) {
+    alert("প্রথমে একটি ছবি নির্বাচন করুন।");
+    return;
+  }
+
+  busy = true;
+  $("process").disabled = true;
+  $("download").disabled = true;
+  $("status").textContent =
+    "ব্যাকগ্রাউন্ড সরানো হচ্ছে। প্রথমবার বেশি সময় লাগতে পারে...";
+
+  try {
+    // উচ্চমানের মডেল ব্যবহার
+    const blob = await removeBackground(file, {
+      model: "isnet"
+    });
+
+    cutout = await createImageBitmap(blob);
+    drawPreview();
+
+    $("download").disabled = false;
+    $("status").textContent =
+      "সম্পন্ন! রং বা ছবির আকার বদলালে আবার AI চালাতে হবে না।";
+
+  } catch (error) {
+    console.error(error);
+    $("status").textContent =
+      "প্রসেসিং ব্যর্থ। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।";
+  } finally {
+    busy = false;
+    $("process").disabled = false;
+  }
+});
+
+$("download").addEventListener("click", () => {
+  if (!cutout) return;
+
+  // চূড়ান্ত ছবিটি পুনরায় আঁকা
+  drawPreview();
+
+  canvas.toBlob(blob => {
+    if (!blob) {
+      $("status").textContent = "ছবি তৈরি করা যায়নি।";
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "photo_480x570.jpg";
+    a.click();
+
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }, "image/jpeg", 0.98);
+});
+</script>
+</body>
+  </html>
+  
